@@ -16,7 +16,8 @@ typedef struct t_info
 
 fd_set curr_sock, cpy_read, cpy_write;
 int user = 0;
-char tmp[1000];
+char tmp[4096], buf[4096], to_send[4096 + 42];
+int count = 0;
 
 t_info *ft_add_server_sock(int fd)
 {
@@ -52,15 +53,15 @@ void send_all_come(t_info *tab, int fd)
 	{
 		if (temp->socket != 0 && temp->socket != fd && temp->socket != 3)
 		{
-			send(temp->socket, tmp, 1000, 0);
-			bzero(&tmp, sizeof(tmp));
+			send(temp->socket, tmp, 4096, 0);
 		}
 		temp = temp->next;
 	}
+	bzero(&tmp, sizeof(tmp));
 	return ;
 }
 
-void	add_client(int sockfd, struct sockaddr_in cli, int len, t_info **tab_sock)
+void	add_client(int sockfd, struct sockaddr_in cli, socklen_t len, t_info **tab_sock)
 {
     int connfd;
     connfd = accept(sockfd, (struct sockaddr *)&cli, &len);
@@ -119,25 +120,7 @@ int get_id(int fd, t_info *tab)
     return (-1);
 }
 
-void send_all(char msg[1000], t_info *tab, int fd)
-{
-	t_info *temp = tab;
-
-	while(temp)
-	{
-		if (temp->socket != 0 && temp->socket != fd && temp->socket != 3)
-		{
-			sprintf(tmp, "client %d: %s", get_id(fd, tab), msg);
-			printf("tmp = %s\n", tmp);
-			send(temp->socket, tmp, 1000, 0);
-			bzero(&tmp, sizeof(tmp));
-		}
-		temp = temp->next;
-	}
-	return ;
-}
-
-void send_all_left(char msg[1000], t_info *tab, int fd)
+void send_all_left(t_info *tab, int fd)
 {
 	t_info *temp = tab;
 
@@ -147,7 +130,7 @@ void send_all_left(char msg[1000], t_info *tab, int fd)
 		{
 			sprintf(tmp, "server: client %d just left\n", get_id(fd, tab));
 			printf("tmp = %s\n", tmp);
-			send(temp->socket, tmp, 1000, 0);
+			send(temp->socket, tmp, 4096, 0);
 			bzero(&tmp, sizeof(tmp));
 		}
 		temp = temp->next;
@@ -155,8 +138,47 @@ void send_all_left(char msg[1000], t_info *tab, int fd)
 	return ;
 }
 
-int main() {
-	int sockfd, connfd, len;
+void send_all(char msg[4096], t_info *tab, int fd)
+{
+	t_info *temp = tab;
+
+	while(temp)
+	{
+		if (temp->socket != 0 && temp->socket != fd && temp->socket != 3)
+		{
+			printf("tmp = %s\n", msg);
+			send(temp->socket, msg, 4096, 0);
+		}
+		temp = temp->next;
+	}
+	return ;
+}
+
+void ex_msg(int fd, t_info *tab)
+{
+    int i = 0;
+    int j = 0;
+
+    while (buf[i])
+    {
+        tmp[j] = buf[i];
+        j++;
+        if (buf[i] == '\n')
+        {
+            sprintf(to_send, "client %d: %s", get_id(fd, tab), tmp);
+            send_all(to_send, tab, fd);
+            j = 0;
+            bzero(&tmp, strlen(tmp));
+			bzero(&to_send, strlen(to_send));
+        }
+        i++;
+    }
+    bzero(&buf, strlen(buf));
+}
+int main(int argc, char **argv) {
+	argc++;
+	int sockfd;
+	socklen_t len;
 	struct sockaddr_in servaddr, cli; 
 	t_info *tab_socket;
 	// socket create and verification 
@@ -172,7 +194,7 @@ int main() {
 	// assign IP, PORT 
 	servaddr.sin_family = AF_INET; 
 	servaddr.sin_addr.s_addr = htonl(2130706433); //127.0.0.1
-	servaddr.sin_port = htons(10011); 
+	servaddr.sin_port = htons(atoi(argv[1])); 
   
 	// Binding newly created socket to given IP and verification 
 	if ((bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0) { 
@@ -188,11 +210,11 @@ int main() {
 	tab_socket = ft_add_server_sock(sockfd);
     FD_ZERO(&curr_sock);
     FD_SET(sockfd, &curr_sock);
-	char msg[1000];
-	int rec = 0;
+	char msg[4096];
 	len = sizeof(cli);
 	bzero(&msg, sizeof(msg));
 	bzero(&tmp, sizeof(tmp));
+	bzero(&to_send, sizeof(to_send));
     while(1)
     {
 		cpy_read = curr_sock;
@@ -209,21 +231,28 @@ int main() {
                 }
 				else
 				{
-					rec = recv(fd, msg, 1000, 0);
-					if (rec == 0)
+					int ret_recv = 1000;
+					while (ret_recv == 1000 || buf[strlen(buf) - 1] != '\n')
+					{
+						ret_recv = recv(fd, buf + strlen(buf), 4096, 0);
+						if (ret_recv <= 0)
+							break ;
+					}
+					if (ret_recv == 0)
 					{
 						printf("user left \n");
-						send_all_left(msg, tab_socket, fd);
+						send_all_left( tab_socket, fd);
 						delete_fd(&tab_socket ,fd);
 						FD_CLR(fd, &curr_sock);
+						bzero(&buf, sizeof(buf));
+						bzero(&msg, sizeof(msg));
 						close(fd);
 					}
 					else
 					{	
-						printf("msg = %s", msg);
-						send_all(msg, tab_socket, fd);
-						bzero(&msg, sizeof(msg));
+						ex_msg(fd, tab_socket);
 					}
+					count = 0;
 				}
 			}
 		}
